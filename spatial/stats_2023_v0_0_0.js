@@ -1,35 +1,49 @@
+/*
+Script para extrair csv por ano com as métricas de emissões espacializado, associado a transição, bioma e id municipio
+*/
 
-// bounds
+var geometry22 = 
+    /* color: #d63000 */
+    /* shown: false */
+    /* displayProperties: [
+      {
+        "type": "rectangle"
+      }
+    ] */
+    ee.Geometry.Polygon(
+        [[[-74.98812381322952, 4.245859698311749],
+          [-74.98812381322952, -16.943087947566582],
+          [-43.65511600072952, -16.943087947566582],
+          [-43.65511600072952, 4.245859698311749]]], null, false);
+
+// Bounds
 var geometry = ee.Geometry.Polygon(
         [[[-74.34040691705002, 5.9630086351511690],
                 [-74.34040691705002, -34.09134700746099],
                 [-33.64704754205002, -34.09134700746099],
                 [-33.64704754205002, 5.9630086351511690]]]);
+Map.addLayer(geometry, {}, 'Bbox | BR', false);
 
-Map.addLayer(geometry, {}, 'Image_AMZ_', false);
 
-//var image = ee.ImageCollection("projects/ee-seeg-brazil/assets/collection_9/v1/Biomes_BR_tif").filterMetadata('first', 'equals', '1').mosaic();
-//Map.addLayer(image, {}, 'Image_AMZ_', false)
+// Assets suport
 
-// Add Asset Biomes_BR (Source: IBGE && INCRA, 2019) 
+// -- Add Asset Biomes_BR (Source: IBGE && INCRA, 2019) 
 var BiomesBR = ee.FeatureCollection('projects/ee-seeg-brazil/assets/collection_9/v1/Biomes_BR')//.filter('CD_LEGENDA == "AMAZONIA"');
-
-
 var geom = BiomesBR.geometry().bounds();
 // var geometry = geometry22;
-Map.addLayer(geom, {}, 'Image_AMZ_', false)
+//Map.addLayer(geom, {}, 'Image_AMZ_', false)
 
-// variaveis dinamicas
+// -- Protected areas
 var areasProtegidas_porAno = ee.ImageCollection('projects/ee-seeg-brazil/assets/collection_10/v1/areas-protegidas-por-ano-2021')
   .toBands();
-
 var oldBands_ap = areasProtegidas_porAno.bandNames();
 var newBands_ap = oldBands_ap.map(function(bandName){
   return ee.String(bandName).split('_').get(0);
 });
-
 areasProtegidas_porAno = areasProtegidas_porAno.select(oldBands_ap,newBands_ap);
 
+
+// -- Transitions (SEEG)
 var transitions = ee.Image('projects/mapbiomas-workspace/SEEG/2023/c10/3_1_SEEG_Transitions_stacked');
 
 // band: transicao_1992_1993
@@ -41,14 +55,18 @@ print('transitions',transitions);
 
 // var cos = ee.Image('projects/mapbiomas-workspace/SEEG/2022/SOC/Embrapa/Embrapa_BR_SOCstock_0_30cm_t_ha');
 
+// -- Municip (SEEG)
 var municipios = ee.Image('projects/ee-seeg-brazil/assets/collection_9/v1/mun_BR')
   .multiply(10);
+  
+// -- Biomes (SEEG)
 var biomes = ee.Image('projects/ee-seeg-brazil/assets/collection_9/v1/Biomes_BR_tif');
 
 var territory = municipios.add(biomes);
 
 // Map.addLayer(territory.randomVisualizer(),{},'territory');
 
+// -- Principal component (SEEG-Emissons and Removals spatial)
 var emiss_removal_years = ee.ImageCollection('projects/mapbiomas-workspace/SEEG/2023/c10/Spatial/SEEG_BR_v_0_0_0').mosaic();
 
 transitions.bandNames()
@@ -58,28 +76,45 @@ transitions.bandNames()
   
   bandnames
   //.slice(-2)//cortar a lista
+  
   .forEach(function(band){
     
     var split = band.split('_');
     
     var year_end = split[2];
-    
+    print(bandnames,'Posslice');
     
     var emiss_removal_year = emiss_removal_years.select('emissions_removals_'+year_end)
       .add(100)
       .multiply(100)
       .int();
-
+    
+    
+    // print(emiss_removal_year.reduceRegion({
+    //     reducer:ee.Reducer.minMax(),
+    //     geometry:geometry,
+    //     scale:500,
+    //     // crs:,
+    //     // crsTransform:,
+    //     // bestEffort:,
+    //     maxPixels:1e12,
+    //     // tileScale:
+    //   })
+    // );
+ 
+    Map.addLayer(emiss_removal_year,{},'emiss_removal_year');
+    
     var ap_year = areasProtegidas_porAno.select('ap' + year_end).unmask(0);
     
     var years_transition = band.replace('transicao_','');
     
     var classe = transitions.select(band)
-      .multiply(100000)
+      .multiply(1000000)
       .add(emiss_removal_year);
-    
+
     // print(band,classe);
-    // Map.addLayer(classe.randomVisualizer(),{},band);
+    Map.addLayer(transitions.select(band),{},'transitions');
+    Map.addLayer(classe.randomVisualizer(),{},band+' CLASSE');
     
     var territory_year = territory.multiply(10)
       .add(ap_year);
@@ -121,11 +156,13 @@ transitions.bandNames()
           
           var classe = ee.Number(obj_n0.get('classe'));
           
-          var emiss_removal = classe.mod(100000)
+          var emiss_removal = classe
+            .mod(1000000)
             .divide(100)
             .subtract(100);
             
-          var transition = classe.divide(100000).int();
+
+          var transition = classe.divide(1000000).int();
 
           var transition_prev = transition.divide(10000).int();
           var transition_post = transition.mod(10000);
@@ -156,7 +193,7 @@ transitions.bandNames()
   
      var description = 'SEEG_Emissions-stats-c10_v0_0_0_'+years_transition;
     // --- Version
-    var version = 'c10_v_0_0-0';
+    var version = 'c10_v_0_0_0';
   
     Export.table.toDrive({
       collection:table,
